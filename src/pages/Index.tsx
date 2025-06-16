@@ -1,66 +1,96 @@
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { DragDropContext, Droppable, Draggable, DropResult } from 'react-beautiful-dnd';
-import { Plus, Trash2, Edit3, Check, X } from 'lucide-react';
+import { Plus, SortAsc } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
-
-interface Todo {
-  id: string;
-  text: string;
-  completed: boolean;
-  createdAt: Date;
-}
+import { Todo, TodoFilters } from '@/types/todo';
+import TodoForm from '@/components/TodoForm';
+import TodoFiltersComponent from '@/components/TodoFilters';
+import TodoCard from '@/components/TodoCard';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 const Index = () => {
   const [todos, setTodos] = useState<Todo[]>([
     {
       id: '1',
-      text: 'Welcome to your beautiful todo app!',
+      title: 'Préparer la présentation client',
+      description: 'Finaliser les slides et préparer la démonstration',
+      category: 'Pro' as const,
+      priority: 'Haute' as const,
+      dueDate: new Date(Date.now() + 1000 * 60 * 60 * 24), // Tomorrow
       completed: false,
       createdAt: new Date(),
     },
     {
       id: '2',
-      text: 'Try dragging this task around',
+      title: 'Faire les courses',
+      description: 'Acheter les ingrédients pour le dîner de ce soir',
+      category: 'Perso' as const,
+      priority: 'Moyenne' as const,
+      dueDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 3), // In 3 days
       completed: false,
       createdAt: new Date(),
     },
     {
       id: '3',
-      text: 'Mark this task as complete',
+      title: 'Réviser le code du projet',
+      description: 'Effectuer une revue de code complète',
+      category: 'Pro' as const,
+      priority: 'Basse' as const,
+      dueDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7), // In 1 week
       completed: true,
       createdAt: new Date(),
     },
   ]);
-  const [newTodo, setNewTodo] = useState('');
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editText, setEditText] = useState('');
 
-  const addTodo = () => {
-    if (newTodo.trim()) {
-      const todo: Todo = {
-        id: Date.now().toString(),
-        text: newTodo.trim(),
-        completed: false,
-        createdAt: new Date(),
-      };
-      setTodos([todo, ...todos]);
-      setNewTodo('');
-      toast({
-        title: "Task added!",
-        description: "Your new task has been added successfully.",
-      });
-    }
+  const [showForm, setShowForm] = useState(false);
+  const [editingTodo, setEditingTodo] = useState<Todo | null>(null);
+  const [filters, setFilters] = useState<TodoFilters>({});
+  const [sortBy, setSortBy] = useState<'priority' | 'dueDate' | 'created'>('priority');
+
+  const addTodo = (todoData: Omit<Todo, 'id' | 'createdAt' | 'completed'>) => {
+    const newTodo: Todo = {
+      ...todoData,
+      id: Date.now().toString(),
+      completed: false,
+      createdAt: new Date(),
+    };
+    setTodos([newTodo, ...todos]);
+    setShowForm(false);
+    toast({
+      title: "Tâche créée !",
+      description: "Votre nouvelle tâche a été ajoutée avec succès.",
+    });
+  };
+
+  const updateTodo = (todoData: Omit<Todo, 'id' | 'createdAt' | 'completed'>) => {
+    if (!editingTodo) return;
+    
+    setTodos(todos.map(todo =>
+      todo.id === editingTodo.id 
+        ? { ...todo, ...todoData }
+        : todo
+    ));
+    setEditingTodo(null);
+    toast({
+      title: "Tâche modifiée !",
+      description: "Votre tâche a été mise à jour avec succès.",
+    });
   };
 
   const deleteTodo = (id: string) => {
     setTodos(todos.filter(todo => todo.id !== id));
     toast({
-      title: "Task deleted!",
-      description: "The task has been removed from your list.",
+      title: "Tâche supprimée !",
+      description: "La tâche a été supprimée de votre liste.",
     });
   };
 
@@ -70,82 +100,138 @@ const Index = () => {
     ));
   };
 
-  const startEdit = (id: string, text: string) => {
-    setEditingId(id);
-    setEditText(text);
-  };
-
-  const saveEdit = () => {
-    if (editText.trim()) {
-      setTodos(todos.map(todo =>
-        todo.id === editingId ? { ...todo, text: editText.trim() } : todo
-      ));
-      setEditingId(null);
-      setEditText('');
-      toast({
-        title: "Task updated!",
-        description: "Your task has been updated successfully.",
-      });
-    }
-  };
-
-  const cancelEdit = () => {
-    setEditingId(null);
-    setEditText('');
-  };
-
   const onDragEnd = (result: DropResult) => {
     if (!result.destination) return;
 
-    const items = Array.from(todos);
+    const items = Array.from(filteredAndSortedTodos);
     const [reorderedItem] = items.splice(result.source.index, 1);
     items.splice(result.destination.index, 0, reorderedItem);
 
-    setTodos(items);
+    // Update the original todos array to maintain the new order
+    const reorderedIds = items.map(item => item.id);
+    const newTodos = [...todos];
+    newTodos.sort((a, b) => {
+      const aIndex = reorderedIds.indexOf(a.id);
+      const bIndex = reorderedIds.indexOf(b.id);
+      if (aIndex === -1) return 1;
+      if (bIndex === -1) return -1;
+      return aIndex - bIndex;
+    });
+
+    setTodos(newTodos);
     toast({
-      title: "Task reordered!",
-      description: "Your tasks have been reordered successfully.",
+      title: "Tâches réorganisées !",
+      description: "L'ordre de vos tâches a été mis à jour.",
     });
   };
 
+  const filteredAndSortedTodos = useMemo(() => {
+    let filtered = todos.filter(todo => {
+      const matchesSearch = !filters.search || 
+        todo.title.toLowerCase().includes(filters.search.toLowerCase()) ||
+        (todo.description && todo.description.toLowerCase().includes(filters.search.toLowerCase()));
+      
+      const matchesCategory = !filters.category || todo.category === filters.category;
+      const matchesPriority = !filters.priority || todo.priority === filters.priority;
+      
+      return matchesSearch && matchesCategory && matchesPriority;
+    });
+
+    // Sort the filtered results
+    filtered.sort((a, b) => {
+      if (sortBy === 'priority') {
+        const priorityOrder = { 'Haute': 3, 'Moyenne': 2, 'Basse': 1 };
+        return priorityOrder[b.priority] - priorityOrder[a.priority];
+      } else if (sortBy === 'dueDate') {
+        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+      } else {
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }
+    });
+
+    return filtered;
+  }, [todos, filters, sortBy]);
+
   const completedCount = todos.filter(todo => todo.completed).length;
   const totalCount = todos.length;
+  const urgentCount = todos.filter(todo => {
+    const daysUntil = Math.ceil((todo.dueDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+    return daysUntil <= 2 && daysUntil >= 0 && !todo.completed;
+  }).length;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
-      <div className="container mx-auto px-4 py-8 max-w-4xl">
+      <div className="container mx-auto px-4 py-8 max-w-6xl">
         {/* Header */}
-        <div className="text-center mb-12">
+        <div className="text-center mb-8">
           <h1 className="text-5xl font-bold text-white mb-4 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-            Beautiful Todo
+            Gestionnaire de Tâches
           </h1>
-          <p className="text-slate-300 text-lg">
-            Organize your tasks with style and efficiency
+          <p className="text-slate-300 text-lg mb-6">
+            Organisez vos tâches avec priorités, catégories et échéances
           </p>
-          <div className="mt-6 inline-flex items-center px-6 py-3 bg-white/10 backdrop-blur-sm rounded-full border border-white/20">
-            <span className="text-white font-medium">
-              {completedCount} of {totalCount} tasks completed
-            </span>
+          
+          <div className="flex justify-center gap-6">
+            <div className="inline-flex items-center px-4 py-2 bg-white/10 backdrop-blur-sm rounded-full border border-white/20">
+              <span className="text-white font-medium">
+                {completedCount} / {totalCount} terminées
+              </span>
+            </div>
+            {urgentCount > 0 && (
+              <div className="inline-flex items-center px-4 py-2 bg-red-500/20 backdrop-blur-sm rounded-full border border-red-500/30">
+                <span className="text-red-300 font-medium">
+                  {urgentCount} urgente{urgentCount > 1 ? 's' : ''}
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Add Todo */}
-        <Card className="mb-8 bg-white/10 backdrop-blur-sm border-white/20 shadow-2xl">
-          <CardContent className="p-6">
-            <div className="flex gap-3">
-              <Input
-                placeholder="What needs to be done?"
-                value={newTodo}
-                onChange={(e) => setNewTodo(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && addTodo()}
-                className="flex-1 bg-white/10 border-white/20 text-white placeholder:text-slate-400 focus:border-blue-400"
-              />
-              <Button
-                onClick={addTodo}
-                className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white border-0 shadow-lg transition-all duration-200 hover:scale-105"
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
+        {/* Add Task Button */}
+        <div className="mb-6 text-center">
+          <Button
+            onClick={() => setShowForm(!showForm)}
+            className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Nouvelle tâche
+          </Button>
+        </div>
+
+        {/* Form */}
+        {(showForm || editingTodo) && (
+          <div className="mb-8">
+            <TodoForm
+              onSubmit={editingTodo ? updateTodo : addTodo}
+              onCancel={() => {
+                setShowForm(false);
+                setEditingTodo(null);
+              }}
+              initialData={editingTodo || undefined}
+              isEditing={!!editingTodo}
+            />
+          </div>
+        )}
+
+        {/* Filters */}
+        <TodoFiltersComponent filters={filters} onFiltersChange={setFilters} />
+
+        {/* Sort Controls */}
+        <Card className="bg-white/10 backdrop-blur-sm border-white/20 mb-6">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-4">
+              <SortAsc className="h-4 w-4 text-white" />
+              <span className="text-white">Trier par:</span>
+              <Select value={sortBy} onValueChange={(value: 'priority' | 'dueDate' | 'created') => setSortBy(value)}>
+                <SelectTrigger className="w-48 bg-white/10 border-white/20 text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-slate-800 border-slate-600">
+                  <SelectItem value="priority" className="text-white hover:bg-slate-700">Priorité</SelectItem>
+                  <SelectItem value="dueDate" className="text-white hover:bg-slate-700">Date d'échéance</SelectItem>
+                  <SelectItem value="created" className="text-white hover:bg-slate-700">Date de création</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </CardContent>
         </Card>
@@ -161,106 +247,33 @@ const Index = () => {
                   snapshot.isDraggingOver ? 'bg-white/5 rounded-lg p-4' : ''
                 }`}
               >
-                {todos.map((todo, index) => (
+                {filteredAndSortedTodos.map((todo, index) => (
                   <Draggable key={todo.id} draggableId={todo.id} index={index}>
                     {(provided, snapshot) => (
-                      <Card
-                        ref={provided.innerRef}
-                        {...provided.draggableProps}
-                        {...provided.dragHandleProps}
-                        className={`bg-white/10 backdrop-blur-sm border-white/20 shadow-lg transition-all duration-200 hover:bg-white/15 hover:scale-[1.02] hover:shadow-xl ${
-                          snapshot.isDragging ? 'rotate-3 shadow-2xl bg-white/20' : ''
-                        } ${todo.completed ? 'opacity-75' : ''}`}
-                      >
-                        <CardContent className="p-6">
-                          <div className="flex items-center gap-4">
-                            {/* Completion Checkbox */}
-                            <button
-                              onClick={() => toggleComplete(todo.id)}
-                              className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-200 hover:scale-110 ${
-                                todo.completed
-                                  ? 'bg-green-500 border-green-500'
-                                  : 'border-white/40 hover:border-white/60'
-                              }`}
-                            >
-                              {todo.completed && <Check className="h-3 w-3 text-white" />}
-                            </button>
-
-                            {/* Todo Text */}
-                            <div className="flex-1">
-                              {editingId === todo.id ? (
-                                <div className="flex gap-2">
-                                  <Input
-                                    value={editText}
-                                    onChange={(e) => setEditText(e.target.value)}
-                                    onKeyPress={(e) => e.key === 'Enter' && saveEdit()}
-                                    className="bg-white/20 border-white/30 text-white"
-                                    autoFocus
-                                  />
-                                  <Button
-                                    onClick={saveEdit}
-                                    size="sm"
-                                    className="bg-green-500 hover:bg-green-600"
-                                  >
-                                    <Check className="h-3 w-3" />
-                                  </Button>
-                                  <Button
-                                    onClick={cancelEdit}
-                                    size="sm"
-                                    variant="outline"
-                                    className="border-white/30 text-white hover:bg-white/10"
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                              ) : (
-                                <p
-                                  className={`text-white transition-all duration-200 ${
-                                    todo.completed ? 'line-through text-slate-400' : ''
-                                  }`}
-                                >
-                                  {todo.text}
-                                </p>
-                              )}
-                            </div>
-
-                            {/* Action Buttons */}
-                            {editingId !== todo.id && (
-                              <div className="flex gap-2">
-                                <Button
-                                  onClick={() => startEdit(todo.id, todo.text)}
-                                  size="sm"
-                                  variant="ghost"
-                                  className="text-blue-400 hover:text-blue-300 hover:bg-blue-400/20"
-                                >
-                                  <Edit3 className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  onClick={() => deleteTodo(todo.id)}
-                                  size="sm"
-                                  variant="ghost"
-                                  className="text-red-400 hover:text-red-300 hover:bg-red-400/20"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-                        </CardContent>
-                      </Card>
+                      <TodoCard
+                        todo={todo}
+                        onToggleComplete={toggleComplete}
+                        onEdit={setEditingTodo}
+                        onDelete={deleteTodo}
+                        provided={provided}
+                        snapshot={snapshot}
+                      />
                     )}
                   </Draggable>
                 ))}
                 {provided.placeholder}
                 
-                {todos.length === 0 && (
+                {filteredAndSortedTodos.length === 0 && (
                   <div className="text-center py-16">
-                    <div className="text-6xl mb-4">✨</div>
+                    <div className="text-6xl mb-4">📝</div>
                     <h3 className="text-xl font-semibold text-white mb-2">
-                      No tasks yet
+                      {todos.length === 0 ? 'Aucune tâche' : 'Aucun résultat'}
                     </h3>
                     <p className="text-slate-400">
-                      Add your first task above to get started!
+                      {todos.length === 0 
+                        ? 'Créez votre première tâche pour commencer !' 
+                        : 'Essayez de modifier vos filtres.'
+                      }
                     </p>
                   </div>
                 )}
@@ -272,7 +285,7 @@ const Index = () => {
         {/* Footer */}
         <div className="mt-16 text-center">
           <p className="text-slate-400">
-            Drag and drop to reorder • Click to edit • Built with ❤️
+            Glissez-déposez pour réorganiser • Cliquez pour modifier • Gestionnaire de tâches avancé
           </p>
         </div>
       </div>
